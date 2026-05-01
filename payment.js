@@ -1,43 +1,70 @@
+const express = require("express");
 const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 
+const app = express();
+app.use(express.json());
 
-const API_KEY = "eyJraWQiOiIxIiwiYWxnIjoiRVMyNTYifQ.eyJ0dCI6IkFBVCIsInN1YiI6IjIwMjcwIiwibWF2IjoiMSIsImV4cCI6MjA5MjgyNDUzMywiaWF0IjoxNzc3MjA1MzMzLCJwbSI6IkRBRixQQUYiLCJqdGkiOiJlMGVkZjg4OC0wZGVkLTQ1MTgtOTMzZi01OGRmMGY4ZDUxN2UifQ.m6a0jggZpXV-TiE7yzycqgMGhE22b4Op9Tw36iM3fUeur7mz3J-cTvuhDX0HHNUMhUFVrri1mYU_nK12U7hiNw";
+// Load from environment
+const API_KEY = process.env.API_KEY;
+const PAYMENT_API_URL = process.env.PAYMENT_API_URL;
 
+// Basic check (important)
+if (!API_KEY || !PAYMENT_API_URL) {
+  console.error("❌ Missing environment variables:");
+  console.error("API_KEY or PAYMENT_API_URL not set");
+}
 
-async function testPayment() {
+// Health check
+app.get("/", (req, res) => {
+  res.send("Payment service running");
+});
+
+// Test payout endpoint
+app.post("/test-payout", async (req, res) => {
   try {
     const response = await axios.post(
-      "https://api.sandbox.pawapay.io/v1/payouts",
+      PAYMENT_API_URL, // ✅ from env
       {
-        payoutId: uuidv4(), // ✅ ONLY THIS ONE
+        payoutId: uuidv4(),
         amount: "100",
         currency: "RWF",
         correspondent: "MTN_MOMO_RWA",
         recipient: {
           type: "MSISDN",
-          address: {
-            value: "250799340639"
-          }
+          address: { value: "250799340639" }
         },
         customerTimestamp: new Date().toISOString(),
         statementDescription: "Sandbox test",
-        callbackUrl: "https://webhook.site/e1c5d437-e768-48c9-9420-ba205263dcc3"
+        callbackUrl: "https://webhook.site/your-id"
       },
       {
         headers: {
-          Authorization: `Bearer ${API_KEY}`,
+          Authorization: `Bearer ${API_KEY}`, // ✅ from env
           "Content-Type": "application/json"
-        }
+        },
+        timeout: 10000
       }
     );
 
+    res.json({
+      success: true,
+      data: response.data
+    });
 
-    console.log("API response:", response.data);
   } catch (err) {
-    console.error("Error:", err.response?.data || err.message);
+    console.error("❌ API ERROR:", err.response?.data || err.message);
+
+    res.status(500).json({
+      success: false,
+      error: err.response?.data || err.message
+    });
   }
-}
+});
 
-
-testPayment();
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log("API_KEY:", API_KEY ? "Loaded" : "Missing");
+  console.log("PAYMENT_API_URL:", PAYMENT_API_URL || "Missing");
+});
