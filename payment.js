@@ -5,29 +5,27 @@ const { v4: uuidv4 } = require("uuid");
 const app = express();
 app.use(express.json());
 
-// ENV (must be set in Railway)
+// =========================
+// ENV
+// =========================
 const API_KEY = process.env.API_KEY;
-const DEPOSITS_API_URL = process.env.DEPOSITS_API_URL || "https://api.sandbox.pawapay.io/deposits";
+const PAYMENT_API_URL = process.env.PAYMENT_API_URL;
 
-if (!API_KEY) {
-  console.error("❌ Missing API_KEY");
+if (!API_KEY || !PAYMENT_API_URL) {
+  console.error("❌ Missing API_KEY or PAYMENT_API_URL");
 }
-
-// simple memory store (replace with DB later)
-const payments = {};
 
 // =========================
 // HEALTH CHECK
 // =========================
 app.get("/", (req, res) => {
-  res.json({ status: "Payment service running" });
+  res.json({ status: "Deposit backend running" });
 });
 
-
 // =========================
-// CREATE CHECKOUT (DEPOSIT FLOW)
+// CREATE DEPOSIT
 // =========================
-app.post("/create-checkout", async (req, res) => {
+app.post("/deposit", async (req, res) => {
   try {
     const { phone, amount } = req.body;
 
@@ -38,6 +36,7 @@ app.post("/create-checkout", async (req, res) => {
       });
     }
 
+    // ✅ FIXED: always valid UUID v4
     const depositId = uuidv4();
 
     const payload = {
@@ -48,41 +47,29 @@ app.post("/create-checkout", async (req, res) => {
       payer: {
         type: "MSISDN",
         address: {
-          value: phone.replace("+", "") // ensure format 2507...
+          value: phone.replace("+", "")
         }
       },
       customerTimestamp: new Date().toISOString(),
-      statementDescription: "Checkout payment",
-      country: "RWA"
+      statementDescription: "CLI test deposit"
     };
 
-    const response = await axios.post(DEPOSITS_API_URL, payload, {
+    const response = await axios.post(PAYMENT_API_URL, payload, {
       headers: {
         Authorization: `Bearer ${API_KEY}`,
         "Content-Type": "application/json"
-      },
-      timeout: 15000
+      }
     });
-
-    // store transaction
-    payments[depositId] = {
-      depositId,
-      phone,
-      amount,
-      status: response.data.status || "PENDING",
-      providerResponse: response.data,
-      createdAt: Date.now()
-    };
 
     res.json({
       success: true,
       depositId,
       status: response.data.status,
-      provider: response.data
+      raw: response.data
     });
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR:", err.response?.data || err.message);
+    console.error("❌ ERROR:", err.response?.data || err.message);
 
     res.status(500).json({
       success: false,
@@ -91,34 +78,11 @@ app.post("/create-checkout", async (req, res) => {
   }
 });
 
-
 // =========================
-// CHECK STATUS
-// =========================
-app.get("/payment/:id", (req, res) => {
-  const payment = payments[req.params.id];
-
-  if (!payment) {
-    return res.status(404).json({
-      success: false,
-      message: "Not found"
-    });
-  }
-
-  res.json({
-    success: true,
-    data: payment
-  });
-});
-
-
-// =========================
-// SERVER
+// START SERVER
 // =========================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("✅ Server running on port", PORT);
-  console.log("DEPOSITS API:", DEPOSITS_API_URL);
-  console.log("API KEY:", API_KEY ? "Loaded" : "Missing");
+  console.log("🚀 Deposit server running on port", PORT);
 });
