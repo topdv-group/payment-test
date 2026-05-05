@@ -1,5 +1,4 @@
-// payment.js - Complete Payment Integration System
-// Frontend files are in /public folder
+// payment.js - Complete with PawaPay Deposit Integration
 
 const express = require('express');
 const admin = require('firebase-admin');
@@ -9,61 +8,40 @@ const path = require('path');
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ========================
-// 🔐 FIREBASE INIT
+// CONFIGURATION
 // ========================
-let db = null;
-let firebaseInitialized = false;
-
-try {
-    if (process.env.FIREBASE_KEY) {
-        const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
-        
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-            databaseURL: process.env.DB_URL
-        });
-        
-        db = admin.database();
-        firebaseInitialized = true;
-        console.log('✅ Firebase initialized successfully');
-    } else {
-        console.log('⚠️ FIREBASE_KEY not set, using memory storage fallback');
-    }
-} catch (err) {
-    console.error('❌ Firebase init error:', err.message);
-}
-
-// ========================
-// ⚙️ CONFIG from environment variables
-// ========================
-const PAYOUT_API_URL = process.env.PAYOUT_API_URL;
-const DEPOSIT_API_URL = process.env.DEPOSIT_API_URL;
-const PAYMENT_API_URL = process.env.PAYMENT_API_URL;
-const API_KEY = process.env.PAYMENT_API_KEY || process.env.API_KEY;
+const PORT = process.env.PORT || 8080;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const MERCHANT_PHONE = process.env.MERCHANT_PHONE || '250795305882';
 const MERCHANT_NAME = process.env.MERCHANT_NAME || 'NTWARI';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
-const BASE_URL = process.env.BASE_URL || 'https://your-app.onrender.com';
-const PORT = process.env.PORT || 8080;
 
-// In-memory storage for when Firebase is not available
-let memoryUsers = {};
-let memoryPaymentRequests = {};
-let memoryWithdrawals = {};
-let memoryContacts = {};
+// PawaPay Configuration
+const PAWAPAY_API_KEY = process.env.PAYMENT_API_KEY || process.env.API_KEY;
+const PAWAPAY_DEPOSIT_URL = process.env.DEPOSIT_API_URL || 'https://api.pawapay.io/v2/deposits';
+const PAWAPAY_PAYOUT_URL = process.env.PAYOUT_API_URL || 'https://api.pawapay.io/v1/payouts';
+const BASE_URL = process.env.BASE_URL || 'https://your-app.onrender.com';
 
 // ========================
-// 🌐 STATIC FILES - Serve from /public folder
+// SERVE STATIC FILES
 // ========================
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ========================
-// 🔧 HELPERS
+// IN-MEMORY DATABASE (Fallback)
 // ========================
+const memoryDB = {
+    users: {},
+    paymentRequests: {},
+    withdrawals: {},
+    contacts: {}
+};
+
+// Helper functions
 function generateId(prefix) {
-    return `${prefix}_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+    return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 }
 
 function generateReferralCode(name) {
@@ -72,159 +50,38 @@ function generateReferralCode(name) {
     return `${base}${random}`;
 }
 
-// Database helper functions
-async function getUsers() {
-    if (firebaseInitialized && db) {
-        const snap = await db.ref('users').once('value');
-        return snap.val() || {};
+// Format phone number for PawaPay (remove + and ensure 250 prefix)
+function formatPhoneForPawaPay(phone) {
+    // Remove any non-digit characters
+    let cleaned = phone.replace(/\D/g, '');
+    // Ensure it starts with 250
+    if (cleaned.startsWith('250')) {
+        return cleaned;
     }
-    return memoryUsers;
-}
-
-async function getUserByPhone(phone) {
-    if (firebaseInitialized && db) {
-        const snap = await db.ref('users')
-            .orderByChild('phone')
-            .equalTo(phone)
-            .once('value');
-        if (snap.exists()) {
-            let user = null;
-            let userId = null;
-            snap.forEach((s) => { user = s.val(); userId = s.key; });
-            return { user, userId };
-        }
-        return null;
+    if (cleaned.startsWith('0')) {
+        return '250' + cleaned.substring(1);
     }
-    
-    for (const [id, user] of Object.entries(memoryUsers)) {
-        if (user.phone === phone) {
-            return { user, userId: id };
-        }
-    }
-    return null;
-}
-
-async function getUserByUserId(userId) {
-    if (firebaseInitialized && db) {
-        const snap = await db.ref(`users/${userId}`).once('value');
-        if (snap.exists()) {
-            return { user: snap.val(), userId };
-        }
-        return null;
-    }
-    
-    if (memoryUsers[userId]) {
-        return { user: memoryUsers[userId], userId };
-    }
-    return null;
-}
-
-async function saveUser(userId, userData) {
-    if (firebaseInitialized && db) {
-        await db.ref(`users/${userId}`).set(userData);
-    } else {
-        memoryUsers[userId] = userData;
-    }
-}
-
-async function updateUser(userId, updates) {
-    if (firebaseInitialized && db) {
-        await db.ref(`users/${userId}`).update(updates);
-    } else if (memoryUsers[userId]) {
-        memoryUsers[userId] = { ...memoryUsers[userId], ...updates };
-    }
-}
-
-async function getPaymentRequestByUserId(userId) {
-    if (firebaseInitialized && db) {
-        const snap = await db.ref('payment_requests')
-            .orderByChild('userId')
-            .equalTo(userId)
-            .once('value');
-        if (snap.exists()) {
-            let request = null;
-            let requestId = null;
-            snap.forEach((s) => { request = s.val(); requestId = s.key; });
-            return { request, requestId };
-        }
-        return null;
-    }
-    
-    for (const [id, req] of Object.entries(memoryPaymentRequests)) {
-        if (req.userId === userId) {
-            return { request: req, requestId: id };
-        }
-    }
-    return null;
-}
-
-async function getPaymentRequestByRef(paymentRef) {
-    if (firebaseInitialized && db) {
-        const snap = await db.ref(`payment_requests/${paymentRef}`).once('value');
-        if (snap.exists()) {
-            return { request: snap.val(), requestId: paymentRef };
-        }
-        return null;
-    }
-    
-    if (memoryPaymentRequests[paymentRef]) {
-        return { request: memoryPaymentRequests[paymentRef], requestId: paymentRef };
-    }
-    return null;
-}
-
-async function savePaymentRequest(requestId, data) {
-    if (firebaseInitialized && db) {
-        await db.ref(`payment_requests/${requestId}`).set(data);
-    } else {
-        memoryPaymentRequests[requestId] = data;
-    }
-}
-
-async function updatePaymentRequest(requestId, updates) {
-    if (firebaseInitialized && db) {
-        await db.ref(`payment_requests/${requestId}`).update(updates);
-    } else if (memoryPaymentRequests[requestId]) {
-        memoryPaymentRequests[requestId] = { ...memoryPaymentRequests[requestId], ...updates };
-    }
-}
-
-async function saveWithdrawal(withdrawalId, data) {
-    if (firebaseInitialized && db) {
-        await db.ref(`withdrawals/${withdrawalId}`).set(data);
-    } else {
-        memoryWithdrawals[withdrawalId] = data;
-    }
-}
-
-async function getWithdrawals() {
-    if (firebaseInitialized && db) {
-        const snap = await db.ref('withdrawals').once('value');
-        return snap.val() || {};
-    }
-    return memoryWithdrawals;
-}
-
-async function updateWithdrawal(withdrawalId, updates) {
-    if (firebaseInitialized && db) {
-        await db.ref(`withdrawals/${withdrawalId}`).update(updates);
-    } else if (memoryWithdrawals[withdrawalId]) {
-        memoryWithdrawals[withdrawalId] = { ...memoryWithdrawals[withdrawalId], ...updates };
-    }
-}
-
-async function saveContact(contactId, data) {
-    if (firebaseInitialized && db) {
-        await db.ref(`contacts/${contactId}`).set(data);
-    } else {
-        memoryContacts[contactId] = data;
-    }
+    return '250' + cleaned;
 }
 
 // ========================
-// 👤 USER REGISTRATION
+// HEALTH CHECK
+// ========================
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        time: Date.now(),
+        pawapayConfigured: !!PAWAPAY_API_KEY,
+        message: 'Server is running'
+    });
+});
+
+// ========================
+// USER REGISTRATION
 // ========================
 app.post('/api/users/register', async (req, res) => {
+    console.log('📝 Register endpoint called:', req.body);
+    
     try {
         const { fullName, phone, email, password } = req.body;
 
@@ -233,8 +90,15 @@ app.post('/api/users/register', async (req, res) => {
         }
 
         // Check if user exists
-        const existing = await getUserByPhone(phone);
-        if (existing) {
+        let existingUser = null;
+        for (const [id, user] of Object.entries(memoryDB.users)) {
+            if (user.phone === phone) {
+                existingUser = { user, id };
+                break;
+            }
+        }
+
+        if (existingUser) {
             return res.status(409).json({ error: 'Phone number already exists' });
         }
 
@@ -253,7 +117,9 @@ app.post('/api/users/register', async (req, res) => {
             createdAt: Date.now()
         };
 
-        await saveUser(userId, user);
+        memoryDB.users[userId] = user;
+
+        console.log('✅ User registered:', { userId, fullName, phone });
 
         res.status(201).json({ 
             success: true, 
@@ -273,9 +139,11 @@ app.post('/api/users/register', async (req, res) => {
 });
 
 // ========================
-// 👤 USER LOGIN
+// USER LOGIN
 // ========================
 app.post('/api/users/login', async (req, res) => {
+    console.log('🔐 Login endpoint called:', req.body.phone);
+    
     try {
         const { phone, password } = req.body;
 
@@ -283,19 +151,26 @@ app.post('/api/users/login', async (req, res) => {
             return res.status(400).json({ error: 'Phone and password required' });
         }
 
-        const existing = await getUserByPhone(phone);
+        let foundUser = null;
+        let userId = null;
         
-        if (!existing) {
+        for (const [id, user] of Object.entries(memoryDB.users)) {
+            if (user.phone === phone) {
+                foundUser = user;
+                userId = id;
+                break;
+            }
+        }
+
+        if (!foundUser) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        const { user, userId } = existing;
-
-        if (user.password !== password) {
+        if (foundUser.password !== password) {
             return res.status(401).json({ error: 'Invalid password' });
         }
 
-        const { password: _, ...userWithoutPassword } = user;
+        const { password: _, ...userWithoutPassword } = foundUser;
         
         res.json({ 
             success: true, 
@@ -310,9 +185,12 @@ app.post('/api/users/login', async (req, res) => {
 });
 
 // ========================
-// 💳 PAYMENT REQUEST - User pays to developer's MTN account
+// PAYMENT REQUEST - PawaPay Integration
 // ========================
 app.post('/api/payments/request', async (req, res) => {
+    console.log('💰 Payment request endpoint called!');
+    console.log('Request body:', req.body);
+    
     try {
         const { userId, phone, amount = 1500 } = req.body;
         
@@ -320,15 +198,28 @@ app.post('/api/payments/request', async (req, res) => {
             return res.status(400).json({ error: 'userId and phone required' });
         }
         
-        // Check if user exists
-        const userResult = await getUserByUserId(userId);
-        if (!userResult) {
+        // Find user
+        let user = null;
+        let foundUserId = null;
+        
+        if (memoryDB.users[userId]) {
+            user = memoryDB.users[userId];
+            foundUserId = userId;
+        } else {
+            for (const [id, u] of Object.entries(memoryDB.users)) {
+                if (u.phone === phone) {
+                    user = u;
+                    foundUserId = id;
+                    break;
+                }
+            }
+        }
+        
+        if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
         
-        const { user, userId: foundUserId } = userResult;
-        
-        // If already approved, return referral code
+        // If already approved
         if (user.status === 'approved' && user.referralCode) {
             return res.json({ 
                 success: true, 
@@ -337,81 +228,105 @@ app.post('/api/payments/request', async (req, res) => {
             });
         }
         
-        // Check if there's already a pending payment request
-        const existingRequest = await getPaymentRequestByUserId(foundUserId);
+        // Check for existing pending payment
+        let existingRequest = null;
+        let existingRequestId = null;
         
-        if (existingRequest && existingRequest.request.status === 'PENDING') {
+        for (const [id, req] of Object.entries(memoryDB.paymentRequests)) {
+            if (req.userId === foundUserId && req.status === 'PENDING') {
+                existingRequest = req;
+                existingRequestId = id;
+                break;
+            }
+        }
+        
+        if (existingRequest) {
             return res.json({
                 success: true,
-                paymentRef: existingRequest.requestId,
-                manualPayment: true,
+                paymentRef: existingRequestId,
+                manualPayment: !existingRequest.pawaPayInitiated,
                 merchantPhone: MERCHANT_PHONE,
                 merchantName: MERCHANT_NAME,
                 amount: amount,
-                message: `Send ${amount} RWF to ${MERCHANT_PHONE} (${MERCHANT_NAME}) with ref: ${existingRequest.requestId}`
+                message: existingRequest.pawaPayInitiated 
+                    ? "Payment initiated. Complete on your phone."
+                    : `Send ${amount} RWF to ${MERCHANT_PHONE} (${MERCHANT_NAME}) with ref: ${existingRequestId}`
             });
         }
         
         // Generate payment reference
         const paymentRef = generateId('PAY');
+        console.log('📝 Creating new payment request:', paymentRef);
+        
+        // Try PawaPay deposit
+        let pawaPaySuccess = false;
+        let pawaPayResponse = null;
+        let paymentUrl = null;
+        
+        if (PAWAPAY_API_KEY && PAWAPAY_API_KEY !== 'your_api_key_here') {
+            try {
+                const formattedPhone = formatPhoneForPawaPay(phone);
+                const depositId = crypto.randomUUID(); // Generate UUID for PawaPay
+                
+                const depositPayload = {
+                    depositId: depositId,
+                    amount: String(amount),
+                    currency: "RWF",
+                    payer: {
+                        type: "MMO",
+                        accountDetails: {
+                            phoneNumber: formattedPhone,
+                            provider: "MTN_MOMO_RWA"
+                        }
+                    }
+                };
+                
+                console.log('📤 Initiating PawaPay deposit with payload:', depositPayload);
+                
+                const response = await axios.post(PAWAPAY_DEPOSIT_URL, depositPayload, {
+                    headers: {
+                        'Authorization': `Bearer ${PAWAPAY_API_KEY}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    timeout: 15000
+                });
+                
+                pawaPayResponse = response.data;
+                console.log('✅ PawaPay response:', pawaPayResponse);
+                
+                // Check if deposit was initiated successfully
+                if (pawaPayResponse && pawaPayResponse.status !== 'FAILED') {
+                    pawaPaySuccess = true;
+                    paymentUrl = pawaPayResponse.paymentUrl || pawaPayResponse.checkoutUrl || null;
+                }
+                
+            } catch (pawaPayError) {
+                console.error('❌ PawaPay deposit error:', pawaPayError.response?.data || pawaPayError.message);
+                // Fall back to manual payment
+            }
+        } else {
+            console.log('⚠️ PawaPay API key not configured, using manual payment');
+        }
         
         // Store payment request
-        await savePaymentRequest(paymentRef, {
+        memoryDB.paymentRequests[paymentRef] = {
             userId: foundUserId,
             phone: phone,
             amount: amount,
             status: 'PENDING',
             createdAt: Date.now(),
             merchantPhone: MERCHANT_PHONE,
-            merchantName: MERCHANT_NAME
-        });
+            merchantName: MERCHANT_NAME,
+            pawaPayInitiated: pawaPaySuccess,
+            pawaPayResponse: pawaPayResponse,
+            depositId: pawaPayResponse?.depositId || null
+        };
         
-        // Try to initiate automatic deposit if API is configured
-        let paymentInitiated = false;
-        let paymentUrl = null;
+        console.log('✅ Payment request stored:', { paymentRef, pawaPaySuccess });
         
-        if (DEPOSIT_API_URL && API_KEY && API_KEY !== 'your_api_key_here') {
-            try {
-                const depositPayload = {
-                    depositId: paymentRef,
-                    amount: String(amount),
-                    currency: "RWF",
-                    payer: {
-                        type: "MMO",
-                        accountDetails: {
-                            phoneNumber: phone.replace(/^\+?250/, '250'),
-                            provider: "MTN_MOMO_RWA"
-                        }
-                    },
-                    callbackUrl: `${BASE_URL}/api/webhook/deposit`
-                };
-                
-                console.log('Initiating deposit with PawaPay:', depositPayload);
-                
-                const response = await axios.post(DEPOSIT_API_URL, depositPayload, {
-                    headers: {
-                        'Authorization': `Bearer ${API_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 15000
-                });
-                
-                if (response.data && response.data.status !== 'FAILED') {
-                    paymentInitiated = true;
-                    paymentUrl = response.data.paymentUrl || response.data.checkoutUrl || null;
-                    await updatePaymentRequest(paymentRef, {
-                        providerStatus: response.data.status,
-                        providerResponse: response.data
-                    });
-                    console.log('✅ Deposit initiated successfully');
-                }
-            } catch (paymentError) {
-                console.error('PawaPay deposit error:', paymentError.response?.data || paymentError.message);
-                // Fall back to manual payment
-            }
-        }
-        
-        if (paymentInitiated && paymentUrl) {
+        if (pawaPaySuccess && paymentUrl) {
+            // Return automatic payment URL
             res.json({
                 success: true,
                 paymentRef,
@@ -420,7 +335,7 @@ app.post('/api/payments/request', async (req, res) => {
                 message: "Click the link to complete payment on your phone"
             });
         } else {
-            // Manual payment - user sends money directly to merchant
+            // Return manual payment instructions
             res.json({
                 success: true,
                 paymentRef,
@@ -433,58 +348,73 @@ app.post('/api/payments/request', async (req, res) => {
         }
         
     } catch (err) {
-        console.error('Payment request error:', err);
+        console.error('❌ Payment request error:', err);
         res.status(500).json({ error: err.message });
     }
 });
 
 // ========================
-// 🔔 Webhook for Deposit Callbacks
+// PawaPay Webhook for Deposit Callbacks
 // ========================
-app.post('/api/webhook/deposit', async (req, res) => {
-    console.log('📥 Deposit webhook received:', JSON.stringify(req.body, null, 2));
+app.post('/api/webhook/pawapay', async (req, res) => {
+    console.log('📥 PawaPay webhook received:', JSON.stringify(req.body, null, 2));
+    
+    // Respond immediately to acknowledge receipt
     res.sendStatus(200);
     
     try {
-        const { depositId, status, transactionId, amount, phoneNumber } = req.body;
+        const { depositId, status, transactionId, amount, phoneNumber, reference } = req.body;
         
         if (!depositId) return;
         
-        const paymentResult = await getPaymentRequestByRef(depositId);
+        // Find payment request by depositId
+        let foundPaymentRef = null;
+        let foundPayment = null;
         
-        if (paymentResult && (status === 'SUCCESS' || status === 'COMPLETED')) {
-            const payment = paymentResult.request;
-            
+        for (const [ref, payment] of Object.entries(memoryDB.paymentRequests)) {
+            if (payment.depositId === depositId || payment.paymentRef === depositId) {
+                foundPaymentRef = ref;
+                foundPayment = payment;
+                break;
+            }
+        }
+        
+        if (foundPayment && (status === 'SUCCESS' || status === 'COMPLETED')) {
             // Get user
-            const userResult = await getUserByUserId(payment.userId);
-            if (userResult && userResult.user.status === 'pending') {
-                const user = userResult.user;
+            const user = memoryDB.users[foundPayment.userId];
+            
+            if (user && user.status === 'pending') {
                 const referralCode = generateReferralCode(user.fullName);
                 
                 // Update user to approved
-                await updateUser(payment.userId, {
+                memoryDB.users[foundPayment.userId] = {
+                    ...user,
                     status: 'approved',
                     referralCode: referralCode,
                     paymentVerified: true,
-                    paymentAmount: payment.amount,
+                    paymentAmount: foundPayment.amount,
                     paymentDate: Date.now(),
                     paymentTransactionId: transactionId
-                });
+                };
                 
                 // Update payment request
-                await updatePaymentRequest(depositId, {
+                memoryDB.paymentRequests[foundPaymentRef] = {
+                    ...foundPayment,
                     status: 'COMPLETED',
                     transactionId: transactionId,
-                    completedAt: Date.now()
-                });
+                    completedAt: Date.now(),
+                    webhookStatus: status
+                };
                 
                 console.log(`✅ Auto-approved user: ${user.fullName} with code: ${referralCode}`);
             }
-        } else if (paymentResult) {
-            await updatePaymentRequest(depositId, {
-                providerStatus: status,
-                lastWebhook: Date.now()
-            });
+        } else if (foundPayment) {
+            // Update payment request with status
+            memoryDB.paymentRequests[foundPaymentRef] = {
+                ...foundPayment,
+                webhookStatus: status,
+                lastWebhookAt: Date.now()
+            };
         }
         
     } catch (err) {
@@ -493,19 +423,19 @@ app.post('/api/webhook/deposit', async (req, res) => {
 });
 
 // ========================
-// 🔍 Check Payment Status
+// CHECK PAYMENT STATUS
 // ========================
 app.get('/api/payments/status/:userId', async (req, res) => {
+    console.log('🔍 Payment status check for userId:', req.params.userId);
+    
     try {
         const { userId } = req.params;
         
-        const userResult = await getUserByUserId(userId);
+        const user = memoryDB.users[userId];
         
-        if (!userResult) {
+        if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-        
-        const user = userResult.user;
         
         if (user.status === 'approved' && user.referralCode) {
             return res.json({
@@ -516,13 +446,19 @@ app.get('/api/payments/status/:userId', async (req, res) => {
             });
         }
         
-        // Check payment requests
-        const paymentRequest = await getPaymentRequestByUserId(userId);
+        // Find payment request
+        let paymentRequest = null;
+        for (const [id, req] of Object.entries(memoryDB.paymentRequests)) {
+            if (req.userId === userId) {
+                paymentRequest = { id, ...req };
+                break;
+            }
+        }
         
         res.json({
             success: true,
             status: user.status || 'pending',
-            paymentRequest: paymentRequest ? paymentRequest.request : null
+            paymentRequest: paymentRequest
         });
         
     } catch (err) {
@@ -532,20 +468,28 @@ app.get('/api/payments/status/:userId', async (req, res) => {
 });
 
 // ========================
-// 👤 Get User by Phone
+// GET USER BY PHONE
 // ========================
 app.get('/api/users/phone/:phone', async (req, res) => {
     try {
         const { phone } = req.params;
         
-        const existing = await getUserByPhone(phone);
+        let foundUser = null;
+        let userId = null;
         
-        if (!existing) {
+        for (const [id, user] of Object.entries(memoryDB.users)) {
+            if (user.phone === phone) {
+                foundUser = user;
+                userId = id;
+                break;
+            }
+        }
+        
+        if (!foundUser) {
             return res.status(404).json({ error: 'User not found' });
         }
         
-        const { user, userId } = existing;
-        const { password, ...userWithoutPassword } = user;
+        const { password, ...userWithoutPassword } = foundUser;
         
         res.json({
             success: true,
@@ -560,14 +504,12 @@ app.get('/api/users/phone/:phone', async (req, res) => {
 });
 
 // ========================
-// 👤 Get All Users
+// GET ALL USERS
 // ========================
 app.get('/api/users', async (req, res) => {
     try {
-        const users = await getUsers();
-        
         const safeUsers = {};
-        for (const [id, user] of Object.entries(users)) {
+        for (const [id, user] of Object.entries(memoryDB.users)) {
             const { password, ...safeUser } = user;
             safeUsers[id] = safeUser;
         }
@@ -579,14 +521,16 @@ app.get('/api/users', async (req, res) => {
 });
 
 // ========================
-// 👤 Update User
+// UPDATE USER
 // ========================
 app.post('/api/users/:userId/update', async (req, res) => {
     try {
         const { userId } = req.params;
         const updates = req.body;
         
-        await updateUser(userId, updates);
+        if (memoryDB.users[userId]) {
+            memoryDB.users[userId] = { ...memoryDB.users[userId], ...updates };
+        }
         
         res.json({ success: true });
     } catch (err) {
@@ -595,7 +539,7 @@ app.post('/api/users/:userId/update', async (req, res) => {
 });
 
 // ========================
-// 🔐 Admin Login
+// ADMIN LOGIN
 // ========================
 app.post('/api/admin/login', async (req, res) => {
     const { password } = req.body;
@@ -608,7 +552,7 @@ app.post('/api/admin/login', async (req, res) => {
 });
 
 // ========================
-// Admin: Verify Payment Manually
+// ADMIN VERIFY PAYMENT
 // ========================
 app.post('/api/admin/verify-payment', async (req, res) => {
     try {
@@ -618,39 +562,40 @@ app.post('/api/admin/verify-payment', async (req, res) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
         
-        const paymentResult = await getPaymentRequestByRef(paymentRef);
+        const payment = memoryDB.paymentRequests[paymentRef];
         
-        if (!paymentResult) {
+        if (!payment) {
             return res.status(404).json({ error: 'Payment request not found' });
         }
-        
-        const payment = paymentResult.request;
         
         if (payment.status !== 'PENDING') {
             return res.status(400).json({ error: 'Payment already processed' });
         }
         
-        const userResult = await getUserByUserId(payment.userId);
-        if (!userResult) {
+        const user = memoryDB.users[payment.userId];
+        if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
         
-        const user = userResult.user;
         const referralCode = generateReferralCode(user.fullName);
         
-        await updateUser(payment.userId, {
+        // Update user
+        memoryDB.users[payment.userId] = {
+            ...user,
             status: 'approved',
             referralCode: referralCode,
             paymentVerified: true,
             paymentAmount: payment.amount,
             paymentDate: Date.now()
-        });
+        };
         
-        await updatePaymentRequest(paymentRef, {
+        // Update payment request
+        memoryDB.paymentRequests[paymentRef] = {
+            ...payment,
             status: 'COMPLETED',
             verifiedAt: Date.now(),
             verifiedBy: 'admin'
-        });
+        };
         
         res.json({
             success: true,
@@ -664,7 +609,7 @@ app.post('/api/admin/verify-payment', async (req, res) => {
 });
 
 // ========================
-// 💸 Withdrawal Requests
+// WITHDRAWAL REQUESTS
 // ========================
 app.post('/api/withdrawals/request', async (req, res) => {
     try {
@@ -676,7 +621,7 @@ app.post('/api/withdrawals/request', async (req, res) => {
         
         const withdrawalId = generateId('WITHDRAW');
         
-        const withdrawal = {
+        memoryDB.withdrawals[withdrawalId] = {
             userId,
             userPhone: phone,
             userName: userName || '',
@@ -685,64 +630,48 @@ app.post('/api/withdrawals/request', async (req, res) => {
             createdAt: Date.now()
         };
         
-        await saveWithdrawal(withdrawalId, withdrawal);
-        
         // Update user's earnings
-        const userResult = await getUserByUserId(userId);
-        if (userResult) {
-            const newEarnings = Math.max(0, (userResult.user.earnings || 0) - Number(amount));
-            await updateUser(userId, { earnings: newEarnings });
+        if (memoryDB.users[userId]) {
+            const newEarnings = Math.max(0, (memoryDB.users[userId].earnings || 0) - Number(amount));
+            memoryDB.users[userId].earnings = newEarnings;
         }
         
         res.json({ success: true, withdrawalId });
     } catch (err) {
-        console.error('Withdrawal request error:', err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// ========================
-// GET Withdrawals
-// ========================
 app.get('/api/withdrawals', async (req, res) => {
-    try {
-        const withdrawals = await getWithdrawals();
-        res.json({ success: true, withdrawals });
-    } catch (err) {
-        console.error('Get withdrawals error:', err);
-        res.status(500).json({ error: err.message });
-    }
+    res.json({ success: true, withdrawals: memoryDB.withdrawals });
 });
 
-// ========================
-// UPDATE Withdrawal
-// ========================
 app.post('/api/withdrawals/:id/update', async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
         
-        await updateWithdrawal(id, {
-            status: status,
-            processedAt: Date.now()
-        });
+        if (memoryDB.withdrawals[id]) {
+            memoryDB.withdrawals[id].status = status;
+            memoryDB.withdrawals[id].processedAt = Date.now();
+        }
         
         res.json({ success: true });
     } catch (err) {
-        console.error('Update withdrawal error:', err);
         res.status(500).json({ error: err.message });
     }
 });
 
 // ========================
-// 📝 Contact Messages
+// CONTACT MESSAGES
 // ========================
 app.post('/api/contacts', async (req, res) => {
     try {
         const { userPhone, userName, message } = req.body;
         
         const contactId = generateId('CONTACT');
-        const contact = {
+        
+        memoryDB.contacts[contactId] = {
             userPhone,
             userName,
             message,
@@ -750,81 +679,41 @@ app.post('/api/contacts', async (req, res) => {
             status: 'unread'
         };
         
-        await saveContact(contactId, contact);
-        
         res.json({ success: true });
     } catch (err) {
-        console.error('Contact message error:', err);
         res.status(500).json({ error: err.message });
     }
 });
 
 // ========================
-// Admin: Get Payment Requests
+// CATCH-ALL ROUTE
 // ========================
-app.get('/api/admin/payment-requests', async (req, res) => {
-    try {
-        const { adminKey } = req.query;
-        
-        if (adminKey !== ADMIN_PASSWORD) {
-            return res.status(401).json({ error: 'Unauthorized' });
-        }
-        
-        let requests = {};
-        if (firebaseInitialized && db) {
-            const snap = await db.ref('payment_requests').once('value');
-            requests = snap.val() || {};
-        } else {
-            requests = memoryPaymentRequests;
-        }
-        
-        // Get user details for each request
-        const requestsWithUsers = {};
-        for (const [id, request] of Object.entries(requests)) {
-            const userResult = await getUserByUserId(request.userId);
-            requestsWithUsers[id] = {
-                ...request,
-                userFullName: userResult?.user?.fullName || 'Unknown',
-                userPhone: userResult?.user?.phone || 'Unknown'
-            };
-        }
-        
-        res.json({ success: true, paymentRequests: requestsWithUsers });
-    } catch (err) {
-        console.error('Get payment requests error:', err);
-        res.status(500).json({ error: err.message });
-    }
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // ========================
-// ❤️ Health Check
-// ========================
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        time: Date.now(),
-        firebase: firebaseInitialized,
-        storage: firebaseInitialized ? 'firebase' : 'memory',
-        endpoints: {
-            users: '/api/users',
-            login: '/api/users/login',
-            register: '/api/users/register',
-            payments: '/api/payments/request',
-            withdrawals: '/api/withdrawals',
-            admin: '/api/admin/login'
-        }
-    });
-});
-
-// ========================
-// 🚀 START SERVER
+// START SERVER
 // ========================
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n🚀 Server running on port ${PORT}`);
-    console.log(`📱 Merchant Phone: ${MERCHANT_PHONE}`);
-    console.log(`👤 Merchant Name: ${MERCHANT_NAME}`);
-    console.log(`🔑 Admin Password: ${ADMIN_PASSWORD}`);
-    console.log(`🔥 Firebase: ${firebaseInitialized ? 'Connected' : 'Using memory storage'}`);
-    console.log(`📁 Static files serving from: ${path.join(__dirname, 'public')}`);
-    console.log(`\n✅ Ready to accept requests!\n`);
+    console.log(`
+╔═══════════════════════════════════════════════════════════════╗
+║     🚀 REFERRAL PAYMENT SYSTEM WITH PAWAPAY INTEGRATION       ║
+╠═══════════════════════════════════════════════════════════════╣
+║  Port: ${PORT}                                                       ║
+║  Merchant: ${MERCHANT_PHONE} (${MERCHANT_NAME})                        ║
+║  Admin Password: ${ADMIN_PASSWORD}                                   ║
+║                                                                       ║
+║  PawaPay Status: ${PAWAPAY_API_KEY ? '✅ Configured' : '❌ Not Configured'}                                      ║
+║  Deposit URL: ${PAWAPAY_DEPOSIT_URL}                               ║
+║                                                                       ║
+║  Endpoints:                                                          ║
+║  POST   /api/payments/request    - Request payment (PawaPay/Manual)  ║
+║  GET    /api/payments/status/:id - Check payment status              ║
+║  POST   /api/webhook/pawapay     - PawaPay webhook endpoint          ║
+║  POST   /api/users/register      - Register user                     ║
+║  POST   /api/users/login         - Login user                        ║
+║  POST   /api/admin/login         - Admin login                       ║
+╚═══════════════════════════════════════════════════════════════╝
+    `);
 });
