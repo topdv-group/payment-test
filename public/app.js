@@ -173,10 +173,11 @@ function calculateWaitingTime(joinDate) {
 // ========================
 
 // Register user via backend API
+// Register user via backend API with password
 async function registerUserToDatabase(userData) {
     if (!isOnline) throw new Error('No internet connection');
     try {
-        const response = await fetch('/api/users', {
+        const response = await fetch('/api/users/register', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -184,7 +185,8 @@ async function registerUserToDatabase(userData) {
             body: JSON.stringify({
                 fullName: userData.name,
                 phone: userData.phone,
-                email: userData.email || null
+                email: userData.email || null,
+                password: userData.password
             })
         });
         
@@ -194,13 +196,18 @@ async function registerUserToDatabase(userData) {
             throw new Error(result.error || 'Registration failed');
         }
         
-        // Store additional user data in localStorage for now
-        // In production, you'd want to store this in a proper database
-        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
-        localUsers[userData.phone] = {
+        // Store user data (without password) for current session
+        currentUser = {
             ...userData,
             userId: result.userId,
-            createdAt: Date.now()
+            status: result.status || 'pending'
+        };
+        
+        // Also store in localStorage for offline/backup
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        localUsers[userData.phone] = {
+            ...currentUser,
+            password: userData.password
         };
         localStorage.setItem('users', JSON.stringify(localUsers));
         
@@ -212,41 +219,22 @@ async function registerUserToDatabase(userData) {
 }
 
 // Get user by phone via backend API
+// Get user by phone from backend
 async function getUserByPhone(phone) {
     if (!isOnline) throw new Error('No internet connection');
     try {
-        const response = await fetch('/api/users');
-        const result = await response.json();
-        
-        if (result.success && result.users) {
-            const users = result.users;
-            for (let userId in users) {
-                if (users[userId].phone === phone) {
-                    // Merge with local data for additional fields
-                    const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
-                    const localUser = localUsers[phone] || {};
-                    
-                    return {
-                        ...users[userId],
-                        ...localUser,
-                        userId: userId
-                    };
-                }
-            }
-        }
-        
-        // Also check localStorage for pending users not yet synced
+        // Try to get from localStorage first (for offline)
         const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
         if (localUsers[phone]) {
             return localUsers[phone];
         }
         
+        // Otherwise, we need to fetch from backend
+        // For now, return null - login will use the login endpoint
         return null;
     } catch (error) {
-        console.error("Error getting user via API:", error);
-        // Fallback to localStorage
-        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
-        return localUsers[phone] || null;
+        console.error("Error getting user:", error);
+        return null;
     }
 }
 
@@ -707,29 +695,66 @@ async function loginUser() {
     showProgress('loginProgress', 'loginProgressFill', 'loginProgressText');
 
     try {
-        const user = await getUserByPhone(phone);
-        if (!user) {
+        // Call the login endpoint
+        const response = await fetch('/api/users/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ phone, password })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
             hideProgress('loginProgress');
-            showAlert('User not found. Please check your phone number.', 'error', 'login');
+            showAlert(result.error || 'Login failed', 'error', 'login');
             return;
         }
-        if (user.password !== password) {
-            hideProgress('loginProgress');
-            showAlert('Incorrect password. Please try again.', 'error', 'login');
-            return;
+        
+        if (result.success) {
+            // Merge with local data if exists
+            const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+            const localUser = localUsers[phone] || {};
+            
+            currentUser = {
+                ...result.user,
+                ...localUser,
+                phone: phone,
+                name: result.user.fullName || localUser.name,
+                password: password // Keep for session
+            };
+            
+            // Store in localStorage for offline access
+            localUsers[phone] = currentUser;
+            localStorage.setItem('users', JSON.stringify(localUsers));
+            
+            completeProgress('loginProgressFill', 'loginProgressText', 'Login successful!');
+            setTimeout(() => {
+                hideProgress('loginProgress');
+                showDashboard();
+                showAlert('Login successful!', 'success', 'dashboard');
+            }, 1000);
         }
-
-        currentUser = user;
-        completeProgress('loginProgressFill', 'loginProgressText', 'Login successful!');
-        setTimeout(() => {
-            hideProgress('loginProgress');
-            showDashboard();
-            showAlert('Login successful!', 'success', 'dashboard');
-        }, 1000);
     } catch (error) {
         console.error("Login error:", error);
         hideProgress('loginProgress');
-        showAlert(error.message === 'No internet connection' ? 'No internet connection. Please check your connection.' : 'Error logging in. Please try again.', 'error', 'login');
+        
+        // Fallback to localStorage check
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        const localUser = localUsers[phone];
+        
+        if (localUser && localUser.password === password) {
+            currentUser = localUser;
+            completeProgress('loginProgressFill', 'loginProgressText', 'Login successful!');
+            setTimeout(() => {
+                hideProgress('loginProgress');
+                showDashboard();
+                showAlert('Login successful (offline mode)!', 'success', 'dashboard');
+            }, 1000);
+        } else {
+            showAlert(error.message === 'No internet connection' ? 'No internet connection. Please check your connection.' : 'Error logging in. Please try again.', 'error', 'login');
+        }
     }
 }
 
