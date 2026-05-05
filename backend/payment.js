@@ -1,4 +1,4 @@
-lets tell railway where the server is through json and also tell me if this server paths are collect {// server.js — Unified Payout + Deposit System (Production Ready)
+// server.js — Unified Payout + Deposit System (Production Ready)
 
 const express = require('express');
 const admin = require('firebase-admin');
@@ -8,24 +8,6 @@ const path = require('path');
 
 const app = express();
 app.use(express.json());
-
-// ========================
-// 🔐 ENVIRONMENT VALIDATION
-// ========================
-const requiredEnvVars = [
-    'FIREBASE_KEY',
-    'DB_URL',
-    'PAYMENT_API_KEY'
-];
-
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-
-if (missingEnvVars.length > 0) {
-    console.error('❌ Missing required environment variables:', missingEnvVars.join(', '));
-    if (process.env.NODE_ENV === 'production') {
-        process.exit(1);
-    }
-}
 
 // ========================
 // 🔐 FIREBASE INIT
@@ -40,27 +22,19 @@ admin.initializeApp({
 const db = admin.database();
 
 // ========================
-// ⚙️ CONFIG - ALL FROM ENV VARS
+// ⚙️ CONFIG
 // ========================
-const PAYOUT_API_URL = process.env.PAYOUT_API_URL;
-const DEPOSIT_API_URL = process.env.DEPOSIT_API_URL;
+const PAYOUT_API_URL = process.env.PAYOUT_API_URL;   // e.g. https://api.pawapay.io/v1/payouts
+const DEPOSIT_API_URL = process.env.DEPOSIT_API_URL; // e.g. https://api.pawapay.io/v2/deposits
 const API_KEY = process.env.PAYMENT_API_KEY;
-
-// Log configuration status (without exposing values)
-console.log('✅ Configuration loaded:', {
-    PAYOUT_API_URL: PAYOUT_API_URL ? 'Set' : 'Not set',
-    DEPOSIT_API_URL: DEPOSIT_API_URL ? 'Set' : 'Not set',
-    API_KEY: API_KEY ? 'Set' : 'Not set',
-    DB_URL: process.env.DB_URL ? 'Set' : 'Not set'
-});
 
 // ========================
 // 🌐 STATIC FILES
 // ========================
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(__dirname));
 
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../public/index.html'));
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // ========================
@@ -106,7 +80,6 @@ app.post('/api/users', async (req, res) => {
         res.status(201).json({ success: true, userId, ...user });
 
     } catch (err) {
-        console.error('Create user error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -117,7 +90,6 @@ app.get('/api/users', async (req, res) => {
         const snap = await db.ref('users').once('value');
         res.json({ success: true, users: snap.val() || {} });
     } catch (err) {
-        console.error('Get users error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -128,14 +100,6 @@ app.get('/api/users', async (req, res) => {
 
 // SEND TO ONE USER
 app.post('/api/payouts/send', async (req, res) => {
-    // Check if payout API is configured
-    if (!PAYOUT_API_URL || !API_KEY) {
-        return res.status(503).json({ 
-            error: 'Payout service not configured',
-            details: 'Missing PAYOUT_API_URL or PAYMENT_API_KEY environment variables'
-        });
-    }
-
     try {
         const { userId, amount } = req.body;
 
@@ -188,7 +152,6 @@ app.post('/api/payouts/send', async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Payout error:', err.response?.data || err.message);
         res.status(500).json({
             error: 'Payout failed',
             details: err.response?.data || err.message
@@ -201,14 +164,6 @@ app.post('/api/payouts/send', async (req, res) => {
 // ========================
 
 app.post('/api/deposits/create', async (req, res) => {
-    // Check if deposit API is configured
-    if (!DEPOSIT_API_URL || !API_KEY) {
-        return res.status(503).json({ 
-            error: 'Deposit service not configured',
-            details: 'Missing DEPOSIT_API_URL or PAYMENT_API_KEY environment variables'
-        });
-    }
-
     try {
         const { phone, amount } = req.body;
 
@@ -252,7 +207,6 @@ app.post('/api/deposits/create', async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Deposit error:', err.response?.data || err.message);
         res.status(500).json({
             error: 'Deposit failed',
             details: err.response?.data || err.message
@@ -266,34 +220,28 @@ app.post('/api/deposits/create', async (req, res) => {
 
 // CHECK DEPOSIT
 app.get('/api/deposits/:id', async (req, res) => {
-    if (!DEPOSIT_API_URL || !API_KEY) {
-        return res.status(503).json({ error: 'Deposit service not configured' });
-    }
-
     try {
         const response = await axios.get(`${DEPOSIT_API_URL}/${req.params.id}`, {
             headers: { Authorization: `Bearer ${API_KEY}` }
         });
+
         res.json(response.data);
+
     } catch (err) {
-        console.error('Check deposit error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
 
 // CHECK PAYOUT
 app.get('/api/payouts/:id', async (req, res) => {
-    if (!PAYOUT_API_URL || !API_KEY) {
-        return res.status(503).json({ error: 'Payout service not configured' });
-    }
-
     try {
         const response = await axios.get(`${PAYOUT_API_URL}/${req.params.id}`, {
             headers: { Authorization: `Bearer ${API_KEY}` }
         });
+
         res.json(response.data);
+
     } catch (err) {
-        console.error('Check payout error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -302,7 +250,6 @@ app.get('/api/payouts/:id', async (req, res) => {
 // 🔔 WEBHOOK
 // ========================
 app.post('/api/webhook', async (req, res) => {
-    // Always respond quickly to webhook
     res.sendStatus(200);
 
     try {
@@ -314,7 +261,6 @@ app.post('/api/webhook', async (req, res) => {
                 transactionId: transactionId || null,
                 updatedAt: Date.now()
             });
-            console.log(`✅ Updated payout ${payoutId} status to ${status}`);
         }
 
         if (depositId) {
@@ -323,11 +269,10 @@ app.post('/api/webhook', async (req, res) => {
                 transactionId: transactionId || null,
                 updatedAt: Date.now()
             });
-            console.log(`✅ Updated deposit ${depositId} status to ${status}`);
         }
 
     } catch (err) {
-        console.error('Webhook processing error:', err);
+        console.error(err);
     }
 });
 
@@ -360,7 +305,6 @@ app.get('/api/stats', async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Stats error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -369,14 +313,7 @@ app.get('/api/stats', async (req, res) => {
 // ❤️ HEALTH
 // ========================
 app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        time: Date.now(),
-        services: {
-            payouts: !!PAYOUT_API_URL,
-            deposits: !!DEPOSIT_API_URL
-        }
-    });
+    res.json({ status: 'ok', time: Date.now() });
 });
 
 // ========================
@@ -386,23 +323,4 @@ const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
-});}{{
-  "name": "referral-payment-system",
-  "version": "1.0.0",
-  "description": "Referral program with payment integration",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "firebase-admin": "^11.10.1",
-    "axios": "^1.5.0",
-    "crypto": "^1.0.1"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
-  }
-}}
+});
