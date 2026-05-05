@@ -45,8 +45,73 @@ function generateId(prefix) {
 }
 
 // ========================
-// 👤 USERS
-// ========================
+
+app.post('/api/webhook', async (req, res) => {
+    // Respond immediately to webhook
+    res.sendStatus(200);
+    
+    try {
+        const { depositId, status, transactionId, phoneNumber, amount } = req.body;
+        
+        console.log(`📥 Webhook received: ${depositId} - ${status}`);
+        
+        // Store the webhook data
+        await db.ref(`webhooks/${depositId}`).set({
+            ...req.body,
+            receivedAt: Date.now()
+        });
+        
+        // Handle successful payment
+        if (status === 'COMPLETED' || status === 'SUCCESS') {
+            // Find user by phone number
+            const usersSnap = await db.ref('users')
+                .orderByChild('phone')
+                .equalTo(phoneNumber)
+                .once('value');
+            
+            if (usersSnap.exists()) {
+                usersSnap.forEach(async (userSnap) => {
+                    const user = userSnap.val();
+                    const userId = userSnap.key;
+                    
+                    // Only auto-approve if user is pending
+                    if (user.status === 'pending') {
+                        // Generate referral code
+                        const base = user.fullName?.replace(/\s+/g, '').toUpperCase().substring(0, 4) || 'USER';
+                        const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+                        const referralCode = `${base}${random}`;
+                        
+                        // Update user to approved
+                        await db.ref(`users/${userId}`).update({
+                            status: 'approved',
+                            referralCode: referralCode,
+                            paymentVerified: true,
+                            paymentAmount: amount,
+                            paymentDate: Date.now(),
+                            paymentTransactionId: transactionId
+                        });
+                        
+                        console.log(`✅ Auto-approved user: ${user.fullName} (${user.phone}) with code: ${referralCode}`);
+                        
+                        // TODO: Send SMS notification (can add later)
+                        // await sendSMS(user.phone, `Your referral code is: ${referralCode}`);
+                    }
+                });
+            }
+        }
+        
+        // Handle payouts (when users withdraw)
+        if (req.body.payoutId && status === 'COMPLETED') {
+            await db.ref(`payments/payouts/${req.body.payoutId}`).update({
+                status: 'SUCCESS',
+                completedAt: Date.now()
+            });
+        }
+        
+    } catch (err) {
+        console.error('Webhook processing error:', err);
+    }
+});
 
 // Admin login endpoint
 app.post('/api/admin/login', async (req, res) => {
@@ -60,6 +125,8 @@ app.post('/api/admin/login', async (req, res) => {
     }
 });
 
+// 👤 USERS
+// ========================
 // CREATE USER
 app.post('/api/users', async (req, res) => {
     try {
