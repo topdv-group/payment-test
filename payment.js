@@ -48,6 +48,18 @@ function generateId(prefix) {
 // 👤 USERS
 // ========================
 
+// Admin login endpoint
+app.post('/api/admin/login', async (req, res) => {
+    const { password } = req.body;
+    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+    
+    if (password === ADMIN_PASSWORD) {
+        res.json({ success: true });
+    } else {
+        res.status(401).json({ error: 'Invalid password' });
+    }
+});
+
 // CREATE USER
 app.post('/api/users', async (req, res) => {
     try {
