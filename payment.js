@@ -46,6 +46,104 @@ function generateId(prefix) {
 
 // ========================
 
+// Add this to server.js - Store user with password
+app.post('/api/users/register', async (req, res) => {
+    try {
+        const { fullName, phone, email, password } = req.body;
+
+        if (!fullName || !phone || !password) {
+            return res.status(400).json({ error: 'fullName, phone, and password required' });
+        }
+
+        // Check if user exists
+        const existing = await db.ref('users')
+            .orderByChild('phone')
+            .equalTo(phone)
+            .once('value');
+
+        if (existing.exists()) {
+            return res.status(409).json({ error: 'Phone already exists' });
+        }
+
+        const userId = db.ref('users').push().key;
+
+        const user = {
+            fullName,
+            phone,
+            email: email || null,
+            password: password, // In production, hash this!
+            status: 'pending',
+            earnings: 0,
+            totalAllTimeEarnings: 0,
+            referrals: {},
+            joinDate: new Date().toISOString(),
+            createdAt: Date.now()
+        };
+
+        await db.ref(`users/${userId}`).set(user);
+
+        res.status(201).json({ 
+            success: true, 
+            userId, 
+            ...user,
+            password: undefined // Don't send password back
+        });
+
+    } catch (err) {
+        console.error('Register error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Add this to server.js - Store user with password
+app.post('/api/users/register', async (req, res) => {
+    try {
+        const { fullName, phone, email, password } = req.body;
+
+        if (!fullName || !phone || !password) {
+            return res.status(400).json({ error: 'fullName, phone, and password required' });
+        }
+
+        // Check if user exists
+        const existing = await db.ref('users')
+            .orderByChild('phone')
+            .equalTo(phone)
+            .once('value');
+
+        if (existing.exists()) {
+            return res.status(409).json({ error: 'Phone already exists' });
+        }
+
+        const userId = db.ref('users').push().key;
+
+        const user = {
+            fullName,
+            phone,
+            email: email || null,
+            password: password, // In production, hash this!
+            status: 'pending',
+            earnings: 0,
+            totalAllTimeEarnings: 0,
+            referrals: {},
+            joinDate: new Date().toISOString(),
+            createdAt: Date.now()
+        };
+
+        await db.ref(`users/${userId}`).set(user);
+
+        res.status(201).json({ 
+            success: true, 
+            userId, 
+            ...user,
+            password: undefined // Don't send password back
+        });
+
+    } catch (err) {
+        console.error('Register error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Request payment for referral code
 app.post('/api/payments/request', async (req, res) => {
     try {
@@ -216,6 +314,53 @@ app.post('/api/admin/login', async (req, res) => {
         res.json({ success: true });
     } else {
         res.status(401).json({ error: 'Invalid password' });
+    }
+});
+
+// Add this to server.js - Login endpoint
+app.post('/api/users/login', async (req, res) => {
+    try {
+        const { phone, password } = req.body;
+
+        if (!phone || !password) {
+            return res.status(400).json({ error: 'Phone and password required' });
+        }
+
+        // Find user by phone
+        const usersSnap = await db.ref('users')
+            .orderByChild('phone')
+            .equalTo(phone)
+            .once('value');
+
+        if (!usersSnap.exists()) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        let foundUser = null;
+        let userId = null;
+        
+        usersSnap.forEach((snap) => {
+            foundUser = snap.val();
+            userId = snap.key;
+        });
+
+        // Check password
+        if (foundUser.password !== password) {
+            return res.status(401).json({ error: 'Invalid password' });
+        }
+
+        // Don't send password back
+        delete foundUser.password;
+        
+        res.json({ 
+            success: true, 
+            userId,
+            user: foundUser 
+        });
+
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: err.message });
     }
 });
 
