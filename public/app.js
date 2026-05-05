@@ -1313,6 +1313,7 @@ window.approveUser = approveUser;
 window.togglePassword = togglePassword;
 window.checkPasswordStrength = checkPasswordStrength;
 window.checkPasswordStrengthRef = checkPasswordStrengthRef;
+window.requestPaymentForReferralCode = requestPaymentForReferralCode;
 
 // Initialize
 showInitialScreen();
