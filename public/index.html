@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Referral Rewards Program</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Initial Choice Screen -->
+    <div class="container" id="initialScreen">
+        <div class="header">
+            <h1>Welcome to Rewards Program</h1>
+            <p>Choose an option to continue</p>
+        </div>
+        <div class="form-container">
+            <div class="progress-container" id="initialProgress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="initialProgressFill"></div>
+                </div>
+                <div class="progress-text" id="initialProgressText">Loading...</div>
+            </div>
+            <div class="form-group">
+                <button class="btn" onclick="window.showLogin()">Login to Account</button>
+            </div>
+            <div class="form-group">
+                <button class="btn" onclick="window.showSignup()">Create New Account</button>
+            </div>
+            <div class="admin-login">
+                <button class="admin-btn" onclick="window.showAdminLogin()">Admin Access</button>
+            </div>
+            <div class="help-section">
+                <p>Need help? Contact us:</p>
+                <div class="help-links">
+                    <a href="mailto:referralrwanda@gmail.com" class="help-link">Email</a>
+                    <a href="https://t.me/yourusername" class="help-link" target="_blank">Telegram</a>
+                    <a href="https://facebook.com/yourpage" class="help-link" target="_blank">Facebook</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Screen -->
+    <div class="container hidden" id="loginScreen">
+        <div class="header">
+            <h1>Login to Your Account</h1>
+            <p>Enter your credentials to continue</p>
+        </div>
+        <div class="form-container">
+            <div id="loginAlert"></div>
+            <div class="progress-container" id="loginProgress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="loginProgressFill"></div>
+                </div>
+                <div class="progress-text" id="loginProgressText">Logging in...</div>
+            </div>
+            <div class="form-group">
+                <label for="loginPhone">Phone Number</label>
+                <input type="tel" id="loginPhone" class="form-control" placeholder="Enter your phone number">
+            </div>
+            <div class="form-group">
+                <label for="loginPassword">Password</label>
+                <input type="password" id="loginPassword" class="form-control" placeholder="Enter your password">
+                <span class="password-toggle" onclick="window.togglePassword('loginPassword')">👁️</span>
+            </div>
+            <div class="forgot-password">
+                <a href="mailto:referralrwanda@gmail.com?subject=Password Reset Request&body=Please reset my password for phone number: " class="forgot-link">Forgot Password?</a>
+            </div>
+            <button class="btn" onclick="window.loginUser()">Login</button>
+            <button class="btn back-btn" onclick="window.showInitialScreen()" style="margin-top: 10px;">Back</button>
+        </div>
+    </div>
+
+    <!-- Main Registration Container -->
+    <div class="container hidden" id="mainContainer">
+        <div class="header">
+            <h1>Join Our Rewards Program</h1>
+            <p>Sign up and start earning with referrals!</p>
+        </div>
+
+        <div class="form-container">
+            <div class="tab-buttons">
+                <button class="tab-btn active" onclick="window.showTab('noReferral')">No Referral Code</button>
+                <button class="tab-btn" onclick="window.showTab('hasReferral')">I Have a Code</button>
+            </div>
+
+            <!-- No Referral Code Form -->
+            <div id="noReferralForm">
+                <div id="noRefAlert"></div>
+                <div class="progress-container" id="noRefProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="noRefProgressFill"></div>
+                    </div>
+                    <div class="progress-text" id="noRefProgressText">Creating account...</div>
+                </div>
+                <div class="form-group">
+                    <label for="fullName">Full Name</label>
+                    <input type="text" id="fullName" class="form-control" placeholder="Enter your full name">
+                </div>
+                <div class="form-group">
+                    <label for="phone">Phone Number</label>
+                    <input type="tel" id="phone" class="form-control" placeholder="Enter your phone number">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" class="form-control" placeholder="Create a strong password (min 6 characters)" onkeyup="window.checkPasswordStrength(this.value)">
+                    <span class="password-toggle" onclick="window.togglePassword('password')">👁️</span>
+                    <div class="password-strength" id="passwordStrength"></div>
+                    <div id="passwordFeedback" style="font-size: 12px; margin-top: 5px;"></div>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm Password</label>
+                    <input type="password" id="confirmPassword" class="form-control" placeholder="Confirm your password">
+                    <span class="password-toggle" onclick="window.togglePassword('confirmPassword')">👁️</span>
+                </div>
+                <button class="btn" onclick="window.registerUser()">Create Account</button>
+            </div>
+
+            <!-- Has Referral Code Form -->
+            <div id="hasReferralForm" class="hidden">
+                <div id="hasRefAlert"></div>
+                <div class="progress-container" id="hasRefProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="hasRefProgressFill"></div>
+                    </div>
+                    <div class="progress-text" id="hasRefProgressText">Creating account...</div>
+                </div>
+                <div class="form-group">
+                    <label for="referralCodeInput">Referral Code</label>
+                    <input type="text" id="referralCodeInput" class="form-control" placeholder="Enter referral code">
+                </div>
+                <div class="form-group">
+                    <label for="refFullName">Full Name</label>
+                    <input type="text" id="refFullName" class="form-control" placeholder="Enter your full name">
+                </div>
+                <div class="form-group">
+                    <label for="refPhone">Phone Number</label>
+                    <input type="tel" id="refPhone" class="form-control" placeholder="Enter your phone number">
+                </div>
+                <div class="form-group">
+                    <label for="refPassword">Password</label>
+                    <input type="password" id="refPassword" class="form-control" placeholder="Create a strong password (min 6 characters)" onkeyup="window.checkPasswordStrengthRef(this.value)">
+                    <span class="password-toggle" onclick="window.togglePassword('refPassword')">👁️</span>
+                    <div class="password-strength" id="refPasswordStrength"></div>
+                    <div id="refPasswordFeedback" style="font-size: 12px; margin-top: 5px;"></div>
+                </div>
+                <div class="form-group">
+                    <label for="refConfirmPassword">Confirm Password</label>
+                    <input type="password" id="refConfirmPassword" class="form-control" placeholder="Confirm your password">
+                    <span class="password-toggle" onclick="window.togglePassword('refConfirmPassword')">👁️</span>
+                </div>
+                <button class="btn" onclick="window.registerUserWithReferral()">Join with Referral</button>
+            </div>
+
+            <button class="btn back-btn" onclick="window.showInitialScreen()" style="margin-top: 20px;">Back</button>
+        </div>
+    </div>
+
+    <!-- User Dashboard -->
+    <div class="container hidden" id="dashboard">
+        <div class="header">
+            <h1>Welcome to Your Dashboard</h1>
+            <p>Track your earnings and referrals</p>
+        </div>
+        <div class="dashboard">
+            <div class="progress-container" id="dashboardProgress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="dashboardProgressFill"></div>
+                </div>
+                <div class="progress-text" id="dashboardProgressText">Loading dashboard...</div>
+            </div>
+           
+            <div class="user-info">
+                <h3 id="userGreeting">Hello, User!</h3>
+                <p>Phone: <span id="userPhone"></span></p>
+            </div>
+
+            <div class="waiting-message hidden" id="waitingMessage">
+                <h3>⏳ Please Wait</h3>
+                <p>Our servers are verifying your payment. To get your referral code, proceed with payment to +250795305882 name: (NTWARI). Your referral code is on the way!</p>
+                <p class="time-info">Waiting since: <span id="waitingSince"></span></p>
+            </div>
+
+            <div class="total-earnings">
+                <div class="stat-number" id="totalAllTimeEarnings">0 RWF</div>
+                <div class="stat-label">Total All-Time Earnings</div>
+            </div>
+
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalEarnings">0 RWF</div>
+                    <div class="stat-label">Available Balance</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="referralCount">0</div>
+                    <div class="stat-label">Successful Referrals</div>
+                </div>
+            </div>
+
+            <div class="referral-code hidden" id="referralCodeSection">
+                <h3>Your Referral Code</h3>
+                <div class="code-display" id="userReferralCode">LOADING...</div>
+                <p style="margin-top: 10px; font-size: 12px; color: #666;">Share this code with friends to earn rewards!</p>
+            </div>
+
+            <div class="withdraw-section">
+                <h3>Withdraw Earnings</h3>
+                <p>Available Balance: <strong id="availableBalance">0 RWF</strong></p>
+                <div class="form-group">
+                    <label for="withdrawAmount">Amount to Withdraw (RWF)</label>
+                    <input type="number" id="withdrawAmount" class="form-control" placeholder="Enter amount">
+                </div>
+                <button class="btn withdraw-btn" onclick="window.requestWithdrawal()">Request Withdrawal</button>
+            </div>
+
+            <div class="contact-form">
+                <h3>Contact Support</h3>
+                <div class="form-group">
+                    <label for="contactMessage">Message</label>
+                    <textarea id="contactMessage" class="form-control" rows="3" placeholder="Enter your message"></textarea>
+                </div>
+                <button class="btn" onclick="window.sendContactMessage()">Send Message</button>
+            </div>
+
+            <div class="history-section">
+                <h3>Transaction History</h3>
+                <div id="historyList">
+                    <div class="loading">Loading history...</div>
+                </div>
+            </div>
+
+            <button class="btn back-btn" onclick="window.logout()">Logout</button>
+        </div>
+    </div>
+
+    <!-- Admin Login -->
+    <div class="container hidden" id="adminLogin">
+        <div class="header">
+            <h1>Admin Login</h1>
+            <p>Restricted Access</p>
+        </div>
+        <div class="form-container">
+            <div id="adminAlert"></div>
+            <div class="progress-container" id="adminProgress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="adminProgressFill"></div>
+                </div>
+                <div class="progress-text" id="adminProgressText">Logging in...</div>
+            </div>
+            <div class="form-group">
+                <label for="adminPassword">Admin Password</label>
+                <input type="password" id="adminPassword" class="form-control" placeholder="Enter admin password">
+                <span class="password-toggle" onclick="window.togglePassword('adminPassword')">👁️</span>
+            </div>
+            <button class="btn" onclick="window.loginAdmin()">Login</button>
+            <button class="btn back-btn" onclick="window.showInitialScreen()" style="margin-top: 10px;">Back</button>
+        </div>
+    </div>
+
+    <!-- Admin Panel -->
+    <div class="container hidden" id="adminPanel">
+        <div class="header">
+            <h1>Admin Panel</h1>
+            <p>User Management</p>
+        </div>
+        <div class="admin-panel">
+            <div class="progress-container" id="adminPanelProgress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="adminPanelProgressFill"></div>
+                </div>
+                <div class="progress-text" id="adminPanelProgressText">Loading data...</div>
+            </div>
+           
+            <button class="btn back-btn" onclick="window.logoutAdmin()">Logout</button>
+
+            <div class="admin-tabs">
+                <div class="admin-tab active" onclick="window.showAdminTab('pendingUsers')">Pending Users</div>
+                <div class="admin-tab" onclick="window.showAdminTab('referrals')">Pending Referrals</div>
+                <div class="admin-tab" onclick="window.showAdminTab('withdrawals')">Withdrawal Requests</div>
+                <div class="admin-tab" onclick="window.showAdminTab('users')">All Users</div>
+            </div>
+
+            <div id="pendingUsersTab">
+                <h3>Users Waiting for Referral Codes</h3>
+                <div class="users-list" id="pendingUsersList">
+                    <div class="loading">Loading pending users...</div>
+                </div>
+            </div>
+
+            <div id="referralsTab" class="hidden">
+                <h3>Referrals Pending Payment Verification</h3>
+                <div class="users-list" id="usersList">
+                    <div class="loading">Loading referrals...</div>
+                </div>
+            </div>
+
+            <div id="withdrawalsTab" class="hidden">
+                <h3>Withdrawal Requests</h3>
+                <div class="users-list" id="withdrawalsList">
+                    <div class="loading">Loading withdrawal requests...</div>
+                </div>
+            </div>
+
+            <div id="usersTab" class="hidden">
+                <h3>All Users</h3>
+                <div class="users-list" id="allUsersList">
+                    <div class="loading">Loading all users...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
