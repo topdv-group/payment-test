@@ -901,22 +901,40 @@ async function loginAdmin() {
     }
    
     showProgress('adminProgress', 'adminProgressFill', 'adminProgressText');
-   
-    // You can change this password or move it to backend
-    if (password === 'admin123') {
-        completeProgress('adminProgressFill', 'adminProgressText', 'Login successful!');
-        setTimeout(() => {
+    
+    try {
+        // Call the backend API instead of checking locally
+        const response = await fetch('/api/admin/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ password: password })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.success) {
+            // Login successful
+            completeProgress('adminProgressFill', 'adminProgressText', 'Login successful!');
+            setTimeout(() => {
+                hideProgress('adminProgress');
+                const adminLogin = document.getElementById('adminLogin');
+                const adminPanel = document.getElementById('adminPanel');
+                if (adminLogin) adminLogin.classList.add('hidden');
+                if (adminPanel) adminPanel.classList.remove('hidden');
+                loadPendingUsersList();
+                showAlert('Admin login successful!', 'success', 'adminPanel');
+            }, 1000);
+        } else {
+            // Login failed
             hideProgress('adminProgress');
-            const adminLogin = document.getElementById('adminLogin');
-            const adminPanel = document.getElementById('adminPanel');
-            if (adminLogin) adminLogin.classList.add('hidden');
-            if (adminPanel) adminPanel.classList.remove('hidden');
-            loadPendingUsersList();
-            showAlert('Admin login successful!', 'success', 'adminPanel');
-        }, 1000);
-    } else {
+            showAlert(result.error || 'Invalid admin password', 'error', 'admin');
+        }
+    } catch (error) {
+        console.error('Admin login error:', error);
         hideProgress('adminProgress');
-        showAlert('Invalid admin password', 'error', 'admin');
+        showAlert('Error connecting to server. Please try again.', 'error', 'admin');
     }
 }
 
