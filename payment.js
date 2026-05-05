@@ -309,6 +309,26 @@ app.get('/api/stats', async (req, res) => {
     }
 });
 
+// Update user metadata (for referrals, earnings, etc.)
+app.post('/api/users/:userId/metadata', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { earnings, referrals, transactions, status, referralCode } = req.body;
+        
+        const updates = {};
+        if (earnings !== undefined) updates.earnings = earnings;
+        if (referrals !== undefined) updates.referrals = referrals;
+        if (transactions !== undefined) updates.transactions = transactions;
+        if (status !== undefined) updates.status = status;
+        if (referralCode !== undefined) updates.referralCode = referralCode;
+        
+        await db.ref(`users/${userId}`).update(updates);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ========================
 // ❤️ HEALTH
 // ========================
