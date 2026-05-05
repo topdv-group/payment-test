@@ -46,6 +46,100 @@ function generateId(prefix) {
 
 // ========================
 
+// Request payment for referral code
+app.post('/api/payments/request', async (req, res) => {
+    try {
+        const { userId, phone, amount = 1500 } = req.body;
+        
+        if (!userId || !phone) {
+            return res.status(400).json({ error: 'userId and phone required' });
+        }
+        
+        // Check if user exists
+        const userSnap = await db.ref(`users/${userId}`).once('value');
+        if (!userSnap.exists()) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        const user = userSnap.val();
+        
+        // If already approved, don't request payment
+        if (user.status === 'approved') {
+            return res.json({ 
+                success: true, 
+                alreadyApproved: true,
+                referralCode: user.referralCode 
+            });
+        }
+        
+        // Generate payment reference
+        const paymentRef = `PAY_${Date.now()}_${userId}`;
+        
+        // Store payment request
+        await db.ref(`payment_requests/${paymentRef}`).set({
+            userId,
+            phone,
+            amount,
+            status: 'PENDING',
+            createdAt: Date.now()
+        });
+        
+        // If you have PawaPay deposit API configured, initiate payment
+        if (DEPOSIT_API_URL && API_KEY) {
+            try {
+                const payload = {
+                    depositId: paymentRef,
+                    amount: String(amount),
+                    currency: "RWF",
+                    payer: {
+                        type: "MMO",
+                        accountDetails: {
+                            phoneNumber: phone,
+                            provider: "MTN_MOMO_RWA"
+                        }
+                    },
+                    callbackUrl: `${process.env.BASE_URL}/api/webhook`
+                };
+                
+                const response = await axios.post(DEPOSIT_API_URL, payload, {
+                    headers: {
+                        Authorization: `Bearer ${API_KEY}`,
+                        "Content-Type": "application/json"
+                    }
+                });
+                
+                res.json({
+                    success: true,
+                    paymentRef,
+                    paymentUrl: response.data.paymentUrl || null,
+                    message: "Payment initiated. Please complete the payment on your phone."
+                });
+            } catch (paymentError) {
+                console.error('Payment initiation error:', paymentError.message);
+                res.json({
+                    success: false,
+                    paymentRef,
+                    manualPayment: true,
+                    message: "Please send money to +250795305882 (NTWARI) with reference: " + paymentRef
+                });
+            }
+        } else {
+            // Manual payment fallback
+            res.json({
+                success: true,
+                paymentRef,
+                manualPayment: true,
+                message: "Please send 1500 RWF to +250795305882 (NTWARI) with reference: " + paymentRef
+            });
+        }
+        
+    } catch (err) {
+        console.error('Payment request error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+//auto give the user referal
 app.post('/api/webhook', async (req, res) => {
     // Respond immediately to webhook
     res.sendStatus(200);
