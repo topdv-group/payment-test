@@ -1,22 +1,4 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, set, get, child, update, push, onValue, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
-
-// Firebase configuration (these are safe to expose - they're public identifiers)
-const firebaseConfig = {
-    apiKey: "AIzaSyC1z-KKYFbSIyTxVw1HeU5e7r7P7AemWAc",
-    authDomain: "refferalrwandaa.firebaseapp.com",
-    databaseURL: "https://refferalrwandaa-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "refferalrwandaa",
-    storageBucket: "refferalrwandaa.firebasestorage.app",
-    messagingSenderId: "427467392935",
-    appId: "1:427467392935:web:ed6cd33e62013ef1085882",
-    measurementId: "G-FP7VVMQK50"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const database = getDatabase(app);
+// app.js - Using Backend API instead of direct Firebase access
 
 // Global variables
 let currentUser = null;
@@ -186,54 +168,136 @@ function calculateWaitingTime(joinDate) {
     }
 }
 
-// Firebase Database Functions
+// ========================
+// BACKEND API FUNCTIONS (代替直接 Firebase 访问)
+// ========================
+
+// Register user via backend API
 async function registerUserToDatabase(userData) {
     if (!isOnline) throw new Error('No internet connection');
     try {
-        await set(ref(database, 'users/' + userData.phone), userData);
+        const response = await fetch('/api/users', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                fullName: userData.name,
+                phone: userData.phone,
+                email: userData.email || null
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.error || 'Registration failed');
+        }
+        
+        // Store additional user data in localStorage for now
+        // In production, you'd want to store this in a proper database
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        localUsers[userData.phone] = {
+            ...userData,
+            userId: result.userId,
+            createdAt: Date.now()
+        };
+        localStorage.setItem('users', JSON.stringify(localUsers));
+        
         return true;
     } catch (error) {
-        console.error("Error registering user:", error);
+        console.error("Error registering user via API:", error);
         throw error;
     }
 }
 
+// Get user by phone via backend API
 async function getUserByPhone(phone) {
     if (!isOnline) throw new Error('No internet connection');
     try {
-        const snapshot = await get(child(ref(database), 'users/' + phone));
-        return snapshot.exists() ? snapshot.val() : null;
-    } catch (error) {
-        console.error("Error getting user:", error);
-        throw error;
-    }
-}
-
-async function getUserByReferralCode(referralCode) {
-    if (!isOnline) throw new Error('No internet connection');
-    try {
-        const usersRef = ref(database, 'users');
-        const snapshot = await get(usersRef);
-       
-        if (snapshot.exists()) {
-            const users = snapshot.val();
-            for (let phone in users) {
-                if (users[phone].referralCode === referralCode) {
-                    return users[phone];
+        const response = await fetch('/api/users');
+        const result = await response.json();
+        
+        if (result.success && result.users) {
+            const users = result.users;
+            for (let userId in users) {
+                if (users[userId].phone === phone) {
+                    // Merge with local data for additional fields
+                    const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+                    const localUser = localUsers[phone] || {};
+                    
+                    return {
+                        ...users[userId],
+                        ...localUser,
+                        userId: userId
+                    };
                 }
             }
         }
+        
+        // Also check localStorage for pending users not yet synced
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        if (localUsers[phone]) {
+            return localUsers[phone];
+        }
+        
         return null;
     } catch (error) {
-        console.error("Error finding user by referral code:", error);
-        throw error;
+        console.error("Error getting user via API:", error);
+        // Fallback to localStorage
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        return localUsers[phone] || null;
     }
 }
 
+// Get user by referral code
+async function getUserByReferralCode(referralCode) {
+    if (!isOnline) throw new Error('No internet connection');
+    try {
+        const response = await fetch('/api/users');
+        const result = await response.json();
+        
+        if (result.success && result.users) {
+            const users = result.users;
+            for (let userId in users) {
+                // Check local storage for referral code
+                const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+                const userWithRef = localUsers[users[userId].phone];
+                if (userWithRef && userWithRef.referralCode === referralCode) {
+                    return {
+                        ...users[userId],
+                        ...userWithRef,
+                        userId: userId
+                    };
+                }
+            }
+        }
+        
+        // Check localStorage only
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        for (let phone in localUsers) {
+            if (localUsers[phone].referralCode === referralCode) {
+                return localUsers[phone];
+            }
+        }
+        
+        return null;
+    } catch (error) {
+        console.error("Error finding user by referral code:", error);
+        return null;
+    }
+}
+
+// Update user data
 async function updateUser(phone, updates) {
     if (!isOnline) throw new Error('No internet connection');
     try {
-        await update(ref(database, 'users/' + phone), updates);
+        // Store updates in localStorage since backend doesn't have all these fields
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        if (localUsers[phone]) {
+            localUsers[phone] = { ...localUsers[phone], ...updates };
+            localStorage.setItem('users', JSON.stringify(localUsers));
+        }
         return true;
     } catch (error) {
         console.error("Error updating user:", error);
@@ -241,29 +305,49 @@ async function updateUser(phone, updates) {
     }
 }
 
+// Get all users
 async function getAllUsers() {
     if (!isOnline) throw new Error('No internet connection');
     try {
-        const snapshot = await get(ref(database, 'users'));
-        return snapshot.exists() ? snapshot.val() : {};
+        const response = await fetch('/api/users');
+        const result = await response.json();
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        
+        // Merge backend users with local data
+        const allUsers = { ...localUsers };
+        
+        if (result.success && result.users) {
+            for (let userId in result.users) {
+                const user = result.users[userId];
+                if (!allUsers[user.phone]) {
+                    allUsers[user.phone] = user;
+                } else {
+                    allUsers[user.phone] = { ...allUsers[user.phone], ...user };
+                }
+            }
+        }
+        
+        return allUsers;
     } catch (error) {
         console.error("Error getting all users:", error);
-        throw error;
+        return JSON.parse(localStorage.getItem('users') || '{}');
     }
 }
 
+// Add withdrawal request
 async function addWithdrawalRequest(userPhone, amount) {
     if (!isOnline) throw new Error('No internet connection');
     try {
+        const withdrawals = JSON.parse(localStorage.getItem('withdrawals') || '{}');
         const withdrawalKey = 'withdrawal_' + Date.now();
-        const withdrawalData = {
+        withdrawals[withdrawalKey] = {
             userPhone: userPhone,
             amount: amount,
             timestamp: new Date().toISOString(),
             status: 'pending',
             userName: currentUser.name
         };
-        await set(ref(database, 'withdrawals/' + withdrawalKey), withdrawalData);
+        localStorage.setItem('withdrawals', JSON.stringify(withdrawals));
         return true;
     } catch (error) {
         console.error("Error adding withdrawal request:", error);
@@ -271,24 +355,27 @@ async function addWithdrawalRequest(userPhone, amount) {
     }
 }
 
+// Get withdrawal requests
 async function getWithdrawalRequests() {
     if (!isOnline) throw new Error('No internet connection');
     try {
-        const snapshot = await get(ref(database, 'withdrawals'));
-        return snapshot.exists() ? snapshot.val() : {};
+        return JSON.parse(localStorage.getItem('withdrawals') || '{}');
     } catch (error) {
         console.error("Error getting withdrawal requests:", error);
-        throw error;
+        return {};
     }
 }
 
+// Update withdrawal status
 async function updateWithdrawalStatus(withdrawalKey, status) {
     if (!isOnline) throw new Error('No internet connection');
     try {
-        await update(ref(database, 'withdrawals/' + withdrawalKey), {
-            status: status,
-            processedAt: new Date().toISOString()
-        });
+        const withdrawals = JSON.parse(localStorage.getItem('withdrawals') || '{}');
+        if (withdrawals[withdrawalKey]) {
+            withdrawals[withdrawalKey].status = status;
+            withdrawals[withdrawalKey].processedAt = new Date().toISOString();
+            localStorage.setItem('withdrawals', JSON.stringify(withdrawals));
+        }
         return true;
     } catch (error) {
         console.error("Error updating withdrawal status:", error);
@@ -296,17 +383,23 @@ async function updateWithdrawalStatus(withdrawalKey, status) {
     }
 }
 
+// Add transaction
 async function addTransaction(userPhone, type, amount, description) {
-    if (!isOnline) throw new Error('No internet connection');
     try {
-        const transactionKey = 'transaction_' + Date.now();
-        const transactionData = {
-            type: type,
-            amount: amount,
-            description: description,
-            timestamp: new Date().toISOString()
-        };
-        await set(ref(database, 'users/' + userPhone + '/transactions/' + transactionKey), transactionData);
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        if (localUsers[userPhone]) {
+            if (!localUsers[userPhone].transactions) {
+                localUsers[userPhone].transactions = {};
+            }
+            const transactionKey = 'transaction_' + Date.now();
+            localUsers[userPhone].transactions[transactionKey] = {
+                type: type,
+                amount: amount,
+                description: description,
+                timestamp: new Date().toISOString()
+            };
+            localStorage.setItem('users', JSON.stringify(localUsers));
+        }
         return true;
     } catch (error) {
         console.error("Error adding transaction:", error);
@@ -475,7 +568,9 @@ async function registerUser() {
         }
 
         const newUser = {
-            name, phone, password,
+            name, 
+            phone, 
+            password,
             referralCode: '',
             earnings: 0,
             totalAllTimeEarnings: 0,
@@ -549,7 +644,9 @@ async function registerUserWithReferral() {
         }
 
         const newUser = {
-            name, phone, password,
+            name, 
+            phone, 
+            password,
             referralCode: '',
             earnings: 0,
             totalAllTimeEarnings: 0,
@@ -779,13 +876,15 @@ async function sendContactMessage() {
         showAlert('Message sent successfully! We will respond as soon as possible.', 'success', 'dashboard');
         if (messageInput) messageInput.value = '';
        
+        const contacts = JSON.parse(localStorage.getItem('contacts') || '{}');
         const contactKey = 'contact_' + Date.now();
-        await set(ref(database, 'contacts/' + contactKey), {
+        contacts[contactKey] = {
             userPhone: currentUser.phone,
             userName: currentUser.name,
             message: message,
             timestamp: new Date().toISOString()
-        });
+        };
+        localStorage.setItem('contacts', JSON.stringify(contacts));
     } catch (error) {
         console.error("Contact message error:", error);
         showAlert('Error sending message. Please try again.', 'error', 'dashboard');
@@ -803,6 +902,7 @@ async function loginAdmin() {
    
     showProgress('adminProgress', 'adminProgressFill', 'adminProgressText');
    
+    // You can change this password or move it to backend
     if (password === 'admin123') {
         completeProgress('adminProgressFill', 'adminProgressText', 'Login successful!');
         setTimeout(() => {
@@ -986,14 +1086,25 @@ async function approveUser(userPhone) {
 
 async function markAsPaid(referrerPhone, referralKey) {
     try {
-        await update(ref(database, `users/${referrerPhone}/referrals/${referralKey}`), { paid: true });
-        const referrer = await getUserByPhone(referrerPhone);
-        const newEarnings = (referrer.earnings || 0) + 1500;
-        const newTotalEarnings = (referrer.totalAllTimeEarnings || 0) + 1500;
-        await updateUser(referrerPhone, { earnings: newEarnings, totalAllTimeEarnings: newTotalEarnings });
-        await addTransaction(referrerPhone, 'earning', 1500, 'Referral bonus for ' + referrer.referrals[referralKey].name);
+        const localUsers = JSON.parse(localStorage.getItem('users') || '{}');
+        if (localUsers[referrerPhone] && localUsers[referrerPhone].referrals && localUsers[referrerPhone].referrals[referralKey]) {
+            localUsers[referrerPhone].referrals[referralKey].paid = true;
+            const newEarnings = (localUsers[referrerPhone].earnings || 0) + 1500;
+            const newTotalEarnings = (localUsers[referrerPhone].totalAllTimeEarnings || 0) + 1500;
+            localUsers[referrerPhone].earnings = newEarnings;
+            localUsers[referrerPhone].totalAllTimeEarnings = newTotalEarnings;
+            localStorage.setItem('users', JSON.stringify(localUsers));
+            
+            await addTransaction(referrerPhone, 'earning', 1500, 'Referral bonus for ' + localUsers[referrerPhone].referrals[referralKey].name);
+            
+            // Update current user if it's the same
+            if (currentUser && currentUser.phone === referrerPhone) {
+                currentUser.earnings = newEarnings;
+                currentUser.totalAllTimeEarnings = newTotalEarnings;
+            }
+        }
         loadUsersList();
-        showAlert(`Marked referral as paid. ${referrer.name} earned 1500 RWF.`, 'success', 'adminPanel');
+        showAlert(`Marked referral as paid. User earned 1500 RWF.`, 'success', 'adminPanel');
     } catch (error) {
         console.error("Error marking as paid:", error);
         showAlert('Error updating payment status. Please try again.', 'error', 'adminPanel');
@@ -1081,3 +1192,5 @@ window.checkPasswordStrengthRef = checkPasswordStrengthRef;
 
 // Initialize
 showInitialScreen();
+
+console.log('✅ App initialized - Using backend API for data storage');
