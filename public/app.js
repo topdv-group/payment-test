@@ -15,91 +15,6 @@ window.addEventListener('offline', () => {
     showAlert('You are offline. Some features may not work.', 'error', 'initialScreen');
 });
 
-//(dont know where to call it)
-async function requestPaymentForReferralCode(userId, phone) {
-    showProgress('dashboardProgress', 'dashboardProgressFill', 'dashboardProgressText');
-    
-    try {
-        const response = await fetch('/api/payments/request', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ userId, phone, amount: 1500 })
-        });
-        
-        const result = await response.json();
-        
-        if (result.alreadyApproved) {
-            // User already has referral code
-            showAlert(`Your referral code is: ${result.referralCode}`, 'success', 'dashboard');
-            showDashboard(); // Refresh dashboard
-            return;
-        }
-        
-        if (result.manualPayment) {
-            // Show manual payment instructions
-            showAlert(
-                `${result.message}\n\nAfter sending money, your referral code will be auto-approved within 5 minutes.`, 
-                'info', 
-                'dashboard'
-            );
-            
-            // Start checking for approval
-            startCheckingApprovalStatus(userId);
-        } else if (result.paymentUrl) {
-            // Redirect to payment page
-            window.open(result.paymentUrl, '_blank');
-            showAlert('Complete payment on your phone. This page will auto-refresh.', 'info', 'dashboard');
-            startCheckingApprovalStatus(userId);
-        }
-        
-        hideProgress('dashboardProgress');
-        
-    } catch (error) {
-        console.error('Payment request error:', error);
-        hideProgress('dashboardProgress');
-        showAlert('Error requesting payment. Please contact support.', 'error', 'dashboard');
-    }
-}
-
-// Poll for approval status( dont know where to call it)
-function startCheckingApprovalStatus(userId) {
-    let attempts = 0;
-    const maxAttempts = 60; // Check for 5 minutes (every 5 seconds)
-    
-    const interval = setInterval(async () => {
-        attempts++;
-        
-        try {
-            const response = await fetch('/api/users');
-            const result = await response.json();
-            
-            if (result.success && result.users) {
-                for (let id in result.users) {
-                    if (id === userId || result.users[id].phone === currentUser.phone) {
-                        const user = result.users[id];
-                        if (user.status === 'approved' && user.referralCode) {
-                            clearInterval(interval);
-                            showAlert(`✅ Payment verified! Your referral code is: ${user.referralCode}`, 'success', 'dashboard');
-                            showDashboard(); // Refresh dashboard
-                            return;
-                        }
-                    }
-                }
-            }
-            
-            if (attempts >= maxAttempts) {
-                clearInterval(interval);
-                showAlert('Payment verification taking longer than expected. Please contact support.', 'warning', 'dashboard');
-            }
-            
-        } catch (error) {
-            console.error('Status check error:', error);
-        }
-    }, 5000); // Check every 5 seconds
-}
-
 // Progress bar functions
 function showProgress(containerId, fillId, textId) {
     const container = document.getElementById(containerId);
@@ -818,6 +733,7 @@ async function loginUser() {
     }
 }
 
+
 async function showDashboard() {
     hideAllScreens();
     const dashboard = document.getElementById('dashboard');
@@ -836,18 +752,41 @@ async function showDashboard() {
         const referralSection = document.getElementById('referralCodeSection');
         const waitingMessage = document.getElementById('waitingMessage');
         const userReferralCode = document.getElementById('userReferralCode');
-        const waitingSince = document.getElementById('waitingSince');
         
-        if (currentUser.status === 'approved' && currentUser.referralCode) {
+        // ============================================
+        // UPDATED: Handle pending users with payment button
+        // ============================================
+        if (currentUser.status === 'pending') {
+            // Show waiting message with payment button
+            if (waitingMessage) {
+                waitingMessage.classList.remove('hidden');
+                // Replace the waiting message content with payment option
+                waitingMessage.innerHTML = `
+                    <h3>💰 Get Your Referral Code</h3>
+                    <p>To get your referral code and start earning, please pay 1500 RWF.</p>
+                    <button onclick="requestPaymentForReferralCode('${currentUser.userId || currentUser.phone}', '${currentUser.phone}')" 
+                            style="margin-top: 10px; padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                        💳 Pay 1500 RWF Now
+                    </button>
+                    <p class="time-info" style="margin-top: 10px;">Auto-approval within 5 minutes after payment</p>
+                    <p class="time-info">Waiting since: ${new Date(currentUser.joinDate).toLocaleDateString()}</p>
+                `;
+            }
+            if (referralSection) referralSection.classList.add('hidden');
+        } 
+        else if (currentUser.status === 'approved' && currentUser.referralCode) {
+            // User is approved - show referral code
             if (referralSection) referralSection.classList.remove('hidden');
             if (waitingMessage) waitingMessage.classList.add('hidden');
             if (userReferralCode) userReferralCode.textContent = currentUser.referralCode;
-        } else {
+        }
+        else {
+            // Fallback - hide both
             if (referralSection) referralSection.classList.add('hidden');
-            if (waitingMessage) waitingMessage.classList.remove('hidden');
-            if (waitingSince) waitingSince.textContent = new Date(currentUser.joinDate).toLocaleDateString();
+            if (waitingMessage) waitingMessage.classList.add('hidden');
         }
        
+        // Calculate referral count and display earnings
         const referralCount = currentUser.referrals ? Object.keys(currentUser.referrals).length : 0;
         const totalEarnings = document.getElementById('totalEarnings');
         const availableBalance = document.getElementById('availableBalance');
@@ -855,10 +794,11 @@ async function showDashboard() {
         const referralCountEl = document.getElementById('referralCount');
         
         if (referralCountEl) referralCountEl.textContent = referralCount;
-        if (totalEarnings) totalEarnings.textContent = `${currentUser.earnings} RWF`;
-        if (availableBalance) availableBalance.textContent = `${currentUser.earnings} RWF`;
+        if (totalEarnings) totalEarnings.textContent = `${currentUser.earnings || 0} RWF`;
+        if (availableBalance) availableBalance.textContent = `${currentUser.earnings || 0} RWF`;
         if (totalAllTime) totalAllTime.textContent = `${currentUser.totalAllTimeEarnings || 0} RWF`;
 
+        // Load transaction history
         loadTransactionHistory();
        
         setTimeout(() => hideProgress('dashboardProgress'), 1000);
@@ -1228,6 +1168,87 @@ async function processWithdrawal(withdrawalKey, status) {
         console.error("Error processing withdrawal:", error);
         showAlert('Error processing withdrawal. Please try again.', 'error', 'adminPanel');
     }
+}
+
+// Add these new functions to app.js (around line 900, before logout function)
+
+// Request payment for referral code
+async function requestPaymentForReferralCode(userId, phone) {
+    showProgress('dashboardProgress', 'dashboardProgressFill', 'dashboardProgressText');
+    
+    try {
+        const response = await fetch('/api/payments/request', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ userId, phone, amount: 1500 })
+        });
+        
+        const result = await response.json();
+        
+        if (result.alreadyApproved) {
+            hideProgress('dashboardProgress');
+            showAlert(`Your referral code is: ${result.referralCode}`, 'success', 'dashboard');
+            showDashboard(); // Refresh dashboard
+            return;
+        }
+        
+        hideProgress('dashboardProgress');
+        
+        if (result.manualPayment) {
+            // Show manual payment instructions
+            showAlert(
+                `${result.message}\n\nAfter sending money, your referral code will be auto-approved within 5 minutes.`, 
+                'info', 
+                'dashboard'
+            );
+            
+            // Start checking for approval
+            startCheckingApprovalStatus(userId);
+        } else if (result.paymentUrl) {
+            // Redirect to payment page
+            window.open(result.paymentUrl, '_blank');
+            showAlert('Complete payment on your phone. This page will auto-refresh.', 'info', 'dashboard');
+            startCheckingApprovalStatus(userId);
+        }
+        
+    } catch (error) {
+        console.error('Payment request error:', error);
+        hideProgress('dashboardProgress');
+        showAlert('Error requesting payment. Please contact support.', 'error', 'dashboard');
+    }
+}
+
+// Poll for approval status
+function startCheckingApprovalStatus(userId) {
+    let attempts = 0;
+    const maxAttempts = 60; // Check for 5 minutes (every 5 seconds)
+    
+    const interval = setInterval(async () => {
+        attempts++;
+        
+        try {
+            // Refresh user data
+            const freshUser = await getUserByPhone(currentUser.phone);
+            
+            if (freshUser && freshUser.status === 'approved' && freshUser.referralCode) {
+                clearInterval(interval);
+                currentUser = freshUser;
+                showAlert(`✅ Payment verified! Your referral code is: ${freshUser.referralCode}`, 'success', 'dashboard');
+                showDashboard(); // Refresh dashboard
+                return;
+            }
+            
+            if (attempts >= maxAttempts) {
+                clearInterval(interval);
+                showAlert('Payment verification taking longer than expected. Please contact support.', 'warning', 'dashboard');
+            }
+            
+        } catch (error) {
+            console.error('Status check error:', error);
+        }
+    }, 5000); // Check every 5 seconds
 }
 
 function logout() {
